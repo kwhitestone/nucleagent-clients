@@ -1,0 +1,20 @@
+{
+  "name": "nucleagent-clients",
+  "version": "0.1.0",
+  "private": true,
+  "author": "Biwei.Lai <biwei.lai@qq.com>",
+  "description": "Remote desktop and Android shells for NucleAgent",
+  "scripts": {
+    "check": "tsc --noEmit",
+    "android:sync": "cd mobile && cap sync android"
+  },
+  "dependencies": {
+    "@capacitor/android": "6.2.2",
+    "@capacitor/core": "6.2.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "6.2.2",
+    "@types/node": "22.10.2",
+    "typescript": "5.7.3"
+  }
+}

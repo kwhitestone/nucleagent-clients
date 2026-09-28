@@ -1,0 +1,23 @@
+node_modules/
+desktop/src-tauri/target/
+desktop/src-tauri/gen/
+mobile/android/.gradle/
+mobile/android/**/build/
+mobile/android/local.properties
+mobile/android/.idea/
+mobile/android/app/src/main/assets/public/
+mobile/android/app/src/main/assets/capacitor.config.json
+mobile/android/app/src/main/assets/capacitor.plugins.json
+*.keystore
+*.jks
+.DS_Store
+
+# Local acceptance credentials and build artifacts
+.g5-accept-work/
+*.cred
+dist/
+*.apk
+*.msi
+*.exe
+.env
+.env.*

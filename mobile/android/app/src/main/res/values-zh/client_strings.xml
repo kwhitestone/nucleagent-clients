@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="exit_title">退出 NucleAgent？</string>
+    <string name="exit_message">是否关闭当前窗口？</string>
+    <string name="stay">取消</string>
+    <string name="exit">退出</string>
+</resources>

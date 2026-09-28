@@ -1,0 +1,7 @@
+{
+  "appId": "top.whitestone.nucleagent",
+  "brandName": "NucleAgent",
+  "remoteUrl": "https://nucleagent.whitestone.top",
+  "deepLinkScheme": "nucleagent",
+  "trustedDomain": "whitestone.top"
+}

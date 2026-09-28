@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="exit_title">Exit NucleAgent?</string>
+    <string name="exit_message">Close this window?</string>
+    <string name="stay">Stay</string>
+    <string name="exit">Exit</string>
+</resources>

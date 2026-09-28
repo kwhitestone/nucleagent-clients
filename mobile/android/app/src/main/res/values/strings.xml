@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">NucleAgent</string>
+    <string name="title_activity_main">NucleAgent</string>
+    <string name="package_name">top.whitestone.nucleagent</string>
+    <string name="custom_url_scheme">top.whitestone.nucleagent</string>
+</resources>

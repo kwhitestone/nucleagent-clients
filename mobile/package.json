@@ -1,0 +1,10 @@
+{
+  "name": "nucleagent-mobile",
+  "version": "0.1.0",
+  "private": true,
+  "author": "Biwei.Lai <biwei.lai@qq.com>",
+  "dependencies": {
+    "@capacitor/android": "6.2.2",
+    "@capacitor/core": "6.2.2"
+  }
+}

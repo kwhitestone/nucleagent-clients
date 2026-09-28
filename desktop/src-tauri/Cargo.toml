@@ -1,0 +1,17 @@
+[package]
+name = "nucleagent-desktop"
+version = "0.1.0"
+description = "NucleAgent remote desktop shell"
+authors = ["Biwei.Lai <biwei.lai@qq.com>"]
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+serde_json = "1"
+
+[dependencies]
+tauri = { version = "2", features = [] }
+open = "5"
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]
