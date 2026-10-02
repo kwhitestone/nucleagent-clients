@@ -98,6 +98,9 @@ func deviceCommand(ctx context.Context, command, root, origin, name string) erro
 }
 
 func runBridge(ctx context.Context, root, generation string, bundle catalog.Bundle) error {
+	if err := platform.RequireTaskIsolation(); err != nil {
+		return err
+	}
 	vaultStore, err := vault.New(filepath.Join(root, "credential"))
 	if err != nil {
 		return err
@@ -216,6 +219,10 @@ func runBridge(ctx context.Context, root, generation string, bundle catalog.Bund
 func executeNative(root, generation string, bundle catalog.Bundle, credential vault.Credential, client *device.Client) bridge.Execute {
 	return func(ctx context.Context, request a2a.ExecutionRequest, backend, selectedGeneration string, emitEvent func(a2a.A2AStreamEventPayload) error) bridge.Outcome {
 		out := bridge.Outcome{Result: a2a.ExecutionResult{StepID: request.StepID, Status: "failed", ErrorCode: "native_execution_failed"}, Clean: true, Integrity: true}
+		if platform.RequireTaskIsolation() != nil {
+			out.Result.ErrorCode = "isolation_unavailable"
+			return out
+		}
 		if backend != "codex" || selectedGeneration != bundle.ID || catalog.Verify(generation, bundle) != nil {
 			out.Integrity = false
 			return out

@@ -18,13 +18,15 @@ func main() {
 	safer := flag.Bool("safer", false, "compare SAFER constrained token before full restrictions")
 	appContainer := flag.Bool("appcontainer", false, "probe bare Win32 AppContainer with a disposable read-only profile")
 	child := flag.Bool("child", false, "internal child probe")
+	descendant := flag.Bool("descendant", false, "internal descendant probe")
 	trace := flag.Bool("loader-trace", false, "x64 loader diagnostic; not acceptance")
 	plan := flag.String("plan", "", "internal read-only child plan")
 	session := flag.Bool("session", false, "Codex empty session, no inference; requires -exe")
 	internet := flag.Bool("internet-client", false, "explicit AppContainer internetClient capability experiment")
+	ntHome := flag.Bool("nt-home", false, "diagnostic: use NT GLOBALROOT form for task environment paths")
 	flag.Parse()
 	if *child {
-		if err := isolation.ChildProbe(*plan); err != nil {
+		if err := isolation.ChildProbe(*plan, *descendant); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
@@ -55,7 +57,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "select one explicit candidate")
 		os.Exit(2)
 	}
-	result := isolation.Probe(*base, *exe, args, *safer, *appContainer, *trace, *session, *internet)
+	result := isolation.Probe(*base, *exe, args, *safer, *appContainer, *trace, *session, *internet, *ntHome)
 	json.NewEncoder(os.Stdout).Encode(result)
 	if result.Error != "" {
 		os.Exit(1)

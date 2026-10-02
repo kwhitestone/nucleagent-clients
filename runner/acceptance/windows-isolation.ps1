@@ -14,7 +14,8 @@ $cases=@(
   @{Name='appcontainer';Args=@('-appcontainer')},
   @{Name='appcontainer-internet';Args=@('-appcontainer','-internet-client')},
   @{Name='codex-version';Args=@('-appcontainer','-exe',$Codex,'--','--version')},
-  @{Name='codex-session';Args=@('-appcontainer','-session','-exe',$Codex)}
+  @{Name='codex-session';Args=@('-appcontainer','-session','-exe',$Codex)},
+  @{Name='codex-session-nt';Args=@('-appcontainer','-session','-nt-home','-exe',$Codex)}
 )
 $summary=@()
 foreach($case in $cases){
@@ -23,8 +24,8 @@ foreach($case in $cases){
   $code=$LASTEXITCODE
   $r=$json | ConvertFrom-Json
   [IO.File]::WriteAllText((Join-Path $Evidence ($case.Name+'.json')),($json -join "`n"),(New-Object Text.UTF8Encoding($false)))
-  $summary+=@{name=$case.Name;exit=$code;stage=$r.Stage;error=$r.Error;resumed=$r.Resumed;jobActiveAfterCleanup=$r.ActiveProcessesAfterCleanup;cleanupError=$r.CleanupError;profileCleanupError=$r.ProfileCleanupError}
+  $summary+=@{name=$case.Name;exit=$code;stage=$r.Stage;error=$r.Error;resumed=$r.Resumed;relayFixtureRequests=$r.RelayRequests;jobActiveAfterCleanup=$r.ActiveProcessesAfterCleanup;cleanupError=$r.CleanupError;profileCleanupError=$r.ProfileCleanupError}
 }
-$manifest=@{timestamp=[DateTime]::UtcNow.ToString('o');probeSHA256=(Get-FileHash $Probe -Algorithm SHA256).Hash;codexSHA256=(Get-FileHash $Codex -Algorithm SHA256).Hash;cases=$summary;inferenceRequests=0;productionAdmission='NOT IMPLEMENTED / NOT APPROVED';note='Diagnostic observations only. Exit 0 is not an isolation acceptance certificate.'}
+$manifest=@{timestamp=[DateTime]::UtcNow.ToString('o');probeSHA256=(Get-FileHash $Probe -Algorithm SHA256).Hash;codexSHA256=(Get-FileHash $Codex -Algorithm SHA256).Hash;cases=$summary;inferenceRequests=0;productionAdmission='FAIL-CLOSED: Windows tasks unavailable until isolated CLI passes';note='Diagnostic observations only. Exit 0 is not an isolation acceptance certificate.'}
 $manifest | ConvertTo-Json -Depth 8 | Set-Content -Encoding UTF8 (Join-Path $Evidence 'matrix.json')
 $manifest | ConvertTo-Json -Depth 8

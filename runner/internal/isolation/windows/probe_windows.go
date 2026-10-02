@@ -3,16 +3,20 @@
 package isolation
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode/utf16"
 	"unsafe"
@@ -40,11 +44,12 @@ type ProbeResult struct {
 	Stdout, Stderr                    string
 	Access                            []AccessObservation
 	Profile, ProfileCleanupError      string
+	RelayRequests                     int32
 }
 
 // Probe is deliberately separate from platform.Start. A failed feasibility
 // probe cannot silently enable ordinary-user execution or a weaker policy.
-func Probe(base, executable string, args []string, safer, appContainer, trace, session, internetClient bool) (result ProbeResult) {
+func Probe(base, executable string, args []string, safer, appContainer, trace, session, internetClient bool, ntHome ...bool) (result ProbeResult) {
 	result.Time = time.Now().UTC().Format(time.RFC3339Nano)
 	result.Mode = "restricted-token"
 	if safer {
@@ -56,7 +61,8 @@ func Probe(base, executable string, args []string, safer, appContainer, trace, s
 			result.Mode += "+internetClient"
 		}
 	}
-	err := probe(base, executable, args, safer, appContainer, trace, session, internetClient, &result)
+	useNT := len(ntHome) == 1 && ntHome[0]
+	err := probe(base, executable, args, safer, appContainer, trace, session, internetClient, useNT, &result)
 	if err != nil {
 		result.Error = err.Error()
 	}
@@ -66,7 +72,7 @@ func Probe(base, executable string, args []string, safer, appContainer, trace, s
 	return
 }
 
-func probe(base, executable string, args []string, safer, appContainer, trace, session, internetClient bool, result *ProbeResult) error {
+func probe(base, executable string, args []string, safer, appContainer, trace, session, internetClient, ntHome bool, result *ProbeResult) error {
 	if trace {
 		runtime.LockOSThread()
 		defer runtime.UnlockOSThread()
@@ -130,7 +136,7 @@ func probe(base, executable string, args []string, safer, appContainer, trace, s
 	if err = SetProbeACL(root, result.SID, false); err != nil {
 		return err
 	}
-	for _, dir := range []string{"workspace", "home", "tmp", "runtime", "control"} {
+	for _, dir := range []string{"workspace", "home", "tmp", "runtime", "control", "cache", "config", "data"} {
 		path := filepath.Join(root, dir)
 		if err = os.Mkdir(path, 0700); err != nil {
 			return err
@@ -139,7 +145,7 @@ func probe(base, executable string, args []string, safer, appContainer, trace, s
 		if dir == "control" {
 			aclSID = ""
 		}
-		if err = SetProbeACL(path, aclSID, dir == "workspace" || dir == "home" || dir == "tmp"); err != nil {
+		if err = SetProbeACL(path, aclSID, dir != "runtime" && dir != "control"); err != nil {
 			return err
 		}
 	}
@@ -206,7 +212,7 @@ func probe(base, executable string, args []string, safer, appContainer, trace, s
 		if !result.BrokerLoopbackOK {
 			return fmt.Errorf("broker loopback fixture failed")
 		}
-		plan := childPlan{root, outside, result.Profile, listener.Addr().String()}
+		plan := childPlan{Root: root, Outside: outside, Profile: result.Profile, Loopback: listener.Addr().String()}
 		b, err := json.Marshal(plan)
 		if err != nil {
 			return err
@@ -275,6 +281,40 @@ func probe(base, executable string, args []string, safer, appContainer, trace, s
 		return err
 	}
 	result.Stage = "stdio"
+	if appContainer && len(args) > 0 && args[0] == "-child" && !internetClient {
+		var count atomic.Int32
+		fixture := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != "POST" || r.URL.Path != "/v1/responses" || r.Header.Get("Authorization") != "Bearer fixture-upstream-only" {
+				http.Error(w, "scope mismatch", 403)
+				return
+			}
+			count.Add(1)
+			_, _ = io.WriteString(w, "fixture-relay-ok")
+		}))
+		defer fixture.Close()
+		relay, err := StartRelay(context.Background(), result.SID, job, fixture.URL+"/v1", "fixture-upstream-only")
+		if err != nil {
+			return err
+		}
+		defer func() { relay.Close(); result.RelayRequests = count.Load() }()
+		path := filepath.Join(root, "runtime", "plan.json")
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		var plan childPlan
+		if err = json.Unmarshal(b, &plan); err != nil {
+			return err
+		}
+		plan.RelayPipe, plan.RelayToken = relay.Pipe, relay.Token
+		b, err = json.Marshal(plan)
+		if err != nil {
+			return err
+		}
+		if err = os.WriteFile(path, b, 0600); err != nil {
+			return err
+		}
+	}
 	var sessionInput *os.File
 	if session {
 		args = []string{"app-server", "--listen", "stdio://", "-c", `model_provider="nucleagent_probe"`, "-c", `model_providers.nucleagent_probe.name="Isolation fixture"`, "-c", `model_providers.nucleagent_probe.base_url="http://127.0.0.1:1/v1"`, "-c", `model_providers.nucleagent_probe.wire_api="responses"`, "-c", `model_providers.nucleagent_probe.requires_openai_auth=false`, "-c", `features.multi_agent=false`, "-c", `analytics.enabled=false`}
@@ -384,7 +424,25 @@ func probe(base, executable string, args []string, safer, appContainer, trace, s
 		return err
 	}
 	env := []string{"SystemRoot=" + system, "WINDIR=" + system, "PATH=" + filepath.Join(system, "System32"), "HOME=" + filepath.Join(root, "home"), "USERPROFILE=" + filepath.Join(root, "home"), "CODEX_HOME=" + filepath.Join(root, "home"), "TEMP=" + filepath.Join(root, "tmp"), "TMP=" + filepath.Join(root, "tmp")}
-	env = append(env, "LOCALAPPDATA="+filepath.Join(root, "home"), "APPDATA="+filepath.Join(root, "home"))
+	env = append(env, "LOCALAPPDATA="+filepath.Join(root, "data"), "APPDATA="+filepath.Join(root, "config"))
+	env = append(env, "TMPDIR="+filepath.Join(root, "tmp"), "XDG_CACHE_HOME="+filepath.Join(root, "cache"), "XDG_CONFIG_HOME="+filepath.Join(root, "config"), "XDG_DATA_HOME="+filepath.Join(root, "data"))
+	if ntHome {
+		p, _ := windows.UTF16PtrFromString(root)
+		h, err := windows.CreateFile(p, 0, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, nil, windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS, 0)
+		if err != nil {
+			return err
+		}
+		var b [32768]uint16
+		_, err = windows.GetFinalPathNameByHandle(h, &b[0], uint32(len(b)), 2)
+		windows.CloseHandle(h)
+		if err != nil {
+			return err
+		}
+		ntRoot := `\\?\GLOBALROOT` + windows.UTF16ToString(b[:])
+		for i := range env {
+			env[i] = strings.ReplaceAll(env[i], root, ntRoot)
+		}
+	}
 	sort.Strings(env)
 	block := utf16.Encode([]rune(strings.Join(env, "\x00") + "\x00\x00"))
 	pi := windows.ProcessInformation{}
@@ -513,6 +571,23 @@ func probe(base, executable string, args []string, safer, appContainer, trace, s
 	}
 	if result.SessionError != "" {
 		return fmt.Errorf("session: %s", result.SessionError)
+	}
+	if appContainer && !internetClient && len(args) > 0 && args[0] == "-child" {
+		var evidence childEvidence
+		if err = json.Unmarshal([]byte(result.Stdout), &evidence); err != nil {
+			return err
+		}
+		if evidence.Descendant == nil {
+			return fmt.Errorf("descendant evidence missing")
+		}
+		for _, e := range []*childEvidence{&evidence, evidence.Descendant} {
+			if err = verifyToken(e.Token, result.SID); err != nil {
+				return err
+			}
+			if !e.InJob || !e.RelayOK || !e.RelayBadTokenRejected || !e.RelayRouteRejected || !e.TaskHTTPRelayOK || !e.RelayInstanceDenied || !e.RelayACLDenied {
+				return fmt.Errorf("relay boundary probe failed")
+			}
+		}
 	}
 	return nil
 }

@@ -3,29 +3,38 @@
 package isolation
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
+	"syscall"
 	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
 
-type childPlan struct{ Root, Outside, Profile, Loopback string }
+type childPlan struct{ Root, Outside, Profile, Loopback, RelayPipe, RelayToken string }
 type childEvidence struct {
-	WindowStation, Desktop, DesktopError string
-	Token                                TokenEvidence
-	InJob                                bool
-	Access                               []AccessObservation
-	LoopbackOK                           bool
-	LoopbackError                        string
+	WindowStation, Desktop, DesktopError                                string
+	Token                                                               TokenEvidence
+	InJob                                                               bool
+	Access                                                              []AccessObservation
+	LoopbackOK                                                          bool
+	LoopbackError                                                       string
+	RelayOK, RelayBadTokenRejected, RelayRouteRejected, TaskHTTPRelayOK bool
+	RelayError                                                          string
+	RelayInstanceDenied, RelayACLDenied                                 bool
+	Descendant                                                          *childEvidence `json:",omitempty"`
 }
 
-func ChildProbe(planPath string) error {
+func ChildProbe(planPath string, descendant ...bool) error {
 	b, err := os.ReadFile(planPath)
 	if err != nil {
 		return err
@@ -61,7 +70,7 @@ func ChildProbe(planPath string) error {
 	e.Access = append(e.Access, AccessObservation{filepath.Join(plan.Root, "home"), "open directory metadata", fmt.Sprint(homeErr), homeErr == nil})
 	if homeErr == nil {
 		defer windows.CloseHandle(homeHandle)
-		for _, flags := range []uint32{0, 8} {
+		for _, flags := range []uint32{0, 8, 2, 10} {
 			var path [32768]uint16
 			_, err := windows.GetFinalPathNameByHandle(homeHandle, &path[0], uint32(len(path)), flags)
 			e.Access = append(e.Access, AccessObservation{filepath.Join(plan.Root, "home"), fmt.Sprintf("GetFinalPathName flags=%d", flags), fmt.Sprint(err), err == nil})
@@ -102,6 +111,78 @@ func ChildProbe(planPath string) error {
 		conn.Close()
 	}
 	e.LoopbackError = fmt.Sprint(err)
+	if plan.RelayPipe != "" {
+		name, _ := windows.UTF16PtrFromString(plan.RelayPipe)
+		h, er := windows.CreateNamedPipe(name, windows.PIPE_ACCESS_DUPLEX|windows.FILE_FLAG_OVERLAPPED, windows.PIPE_TYPE_BYTE|windows.PIPE_REJECT_REMOTE_CLIENTS, 255, 8192, 8192, 0, nil)
+		e.RelayInstanceDenied = er == windows.ERROR_ACCESS_DENIED
+		if er == nil {
+			windows.CloseHandle(h)
+		}
+		h, er = windows.CreateFile(name, windows.WRITE_DAC, 0, nil, windows.OPEN_EXISTING, 0, 0)
+		e.RelayACLDenied = er == windows.ERROR_ACCESS_DENIED
+		if er == nil {
+			windows.CloseHandle(h)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		tr := &http.Transport{Proxy: nil, DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) { return DialRelay(ctx, plan.RelayPipe) }}
+		defer tr.CloseIdleConnections()
+		client := &http.Client{Transport: tr, Timeout: 3 * time.Second}
+		request := func(client *http.Client, endpoint, token string) (int, string, error) {
+			req, er := http.NewRequestWithContext(ctx, "POST", endpoint, strings.NewReader(`{"model":"fixture-only"}`))
+			if er != nil {
+				return 0, "", er
+			}
+			req.Header.Set("Authorization", "Bearer "+token)
+			res, er := client.Do(req)
+			if er != nil {
+				return 0, "", er
+			}
+			defer res.Body.Close()
+			b, er := io.ReadAll(io.LimitReader(res.Body, 1024))
+			return res.StatusCode, string(b), er
+		}
+		status, body, er := request(client, "http://task-broker/v1/responses", plan.RelayToken)
+		e.RelayOK = er == nil && status == 200 && body == "fixture-relay-ok"
+		e.RelayError = fmt.Sprint(er)
+		status, _, er = request(client, "http://task-broker/v1/responses", "wrong-token")
+		e.RelayBadTokenRejected = er == nil && status == 401
+		status, _, er = request(client, "http://task-broker/arbitrary-host", plan.RelayToken)
+		e.RelayRouteRejected = er == nil && status == 403
+		endpoint, close, er := StartTaskHTTPRelay(ctx, plan.RelayPipe, plan.RelayToken)
+		if er == nil {
+			defer close()
+			local := &http.Client{Transport: &http.Transport{Proxy: nil}, Timeout: 3 * time.Second}
+			defer local.CloseIdleConnections()
+			status, body, er = request(local, endpoint+"/responses", plan.RelayToken)
+			e.TaskHTTPRelayOK = er == nil && status == 200 && body == "fixture-relay-ok"
+		}
+		if er != nil {
+			e.RelayError += " task HTTP: " + er.Error()
+		}
+	}
+	if len(descendant) == 0 || !descendant[0] {
+		path := filepath.Join(plan.Root, "workspace", "descendant-evidence.json")
+		f, err := os.Create(path)
+		if err != nil {
+			return err
+		}
+		cmd := exec.Command(os.Args[0], "-child", "-plan", planPath, "-descendant")
+		cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.DETACHED_PROCESS}
+		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, f, os.Stderr
+		err = cmd.Run()
+		f.Close()
+		if err != nil {
+			return fmt.Errorf("descendant: %w", err)
+		}
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if err = json.Unmarshal(b, &e.Descendant); err != nil {
+			return err
+		}
+	}
 	if err = json.NewEncoder(os.Stdout).Encode(e); err != nil {
 		return err
 	}
