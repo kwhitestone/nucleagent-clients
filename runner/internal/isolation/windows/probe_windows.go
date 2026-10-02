@@ -25,6 +25,9 @@ import (
 )
 
 type ProbeResult struct {
+	CompatibilityOptions
+	CapabilitySIDs                    []string
+	Prewarm                           *PrewarmEvidence
 	HomeMode, CodexHome               string
 	ExecutableSHA256                  string
 	BrokerLoopbackOK                  bool
@@ -45,6 +48,7 @@ type ProbeResult struct {
 	Stdout, Stderr                    string
 	Access                            []AccessObservation
 	Profile, ProfileCleanupError      string
+	ProfileHome, ProfileHomeACL       string
 	RelayRequests                     int32
 }
 
@@ -56,7 +60,14 @@ func Probe(base, executable string, args []string, safer, appContainer, trace, s
 
 // ProbeHome varies only a disposable diagnostic's home resolution. It does not
 // change production admission or authorize reparse points in task paths.
-func ProbeHome(base, executable string, args []string, safer, appContainer, trace, session, internetClient, ntHome bool, homeMode string) (result ProbeResult) {
+func ProbeHome(base, executable string, args []string, safer, appContainer, trace, session, internetClient, ntHome bool, homeMode string, options ...CompatibilityOptions) (result ProbeResult) {
+	if len(options) == 1 {
+		result.CompatibilityOptions = options[0]
+	}
+	if len(options) > 1 || ((!appContainer || internetClient) && (result.LPAC || len(result.Capabilities) > 0)) {
+		result.Error = "compatibility options require AppContainer without internetClient"
+		return
+	}
 	result.HomeMode = homeMode
 	result.Time = time.Now().UTC().Format(time.RFC3339Nano)
 	result.Mode = "restricted-token"
@@ -89,7 +100,7 @@ func probe(base, executable string, args []string, safer, appContainer, trace, s
 		return err
 	}
 	var err error
-	result.Parent, err = InspectToken(windows.GetCurrentProcessToken())
+	result.Parent, err = inspectProbeToken(windows.GetCurrentProcessToken())
 	if err != nil {
 		return err
 	}
@@ -133,6 +144,25 @@ func probe(base, executable string, args []string, safer, appContainer, trace, s
 		}); err != nil {
 			return err
 		}
+		if result.HomeMode == "profile-write" || result.HomeMode == "profile-default" {
+			// The sole authorized outside-task writable subtree. Its parent and
+			// all other package-profile directories stay read-only.
+			result.ProfileHome = filepath.Join(result.Profile, ".codex")
+			if err = os.Mkdir(result.ProfileHome, 0700); err != nil {
+				return err
+			}
+			if err = checkPath(result.ProfileHome); err != nil {
+				return err
+			}
+			if err = SetProbeACL(result.ProfileHome, sid.String(), true); err != nil {
+				return err
+			}
+			sd, er := windows.GetNamedSecurityInfo(result.ProfileHome, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.LABEL_SECURITY_INFORMATION)
+			if er != nil {
+				return er
+			}
+			result.ProfileHomeACL = sd.String()
+		}
 	}
 	result.SID = sid.String()
 	root, err := os.MkdirTemp(base, "native-")
@@ -169,6 +199,13 @@ func probe(base, executable string, args []string, safer, appContainer, trace, s
 		return err
 	}
 	if len(args) == 1 && args[0] == "-child" {
+		aapPath := filepath.Join(root, "runtime", "aap-only.txt")
+		if err = os.WriteFile(aapPath, []byte("synthetic AAP-only LPAC discriminator"), 0600); err != nil {
+			return err
+		}
+		if err = SetProbeACL(aapPath, "S-1-15-2-1", false); err != nil {
+			return err
+		}
 		outside, err := os.MkdirTemp(base, "outside-")
 		if err != nil {
 			return err
@@ -219,7 +256,7 @@ func probe(base, executable string, args []string, safer, appContainer, trace, s
 		if !result.BrokerLoopbackOK {
 			return fmt.Errorf("broker loopback fixture failed")
 		}
-		plan := childPlan{Root: root, Outside: outside, Profile: result.Profile, Loopback: listener.Addr().String()}
+		plan := childPlan{Root: root, Outside: outside, Profile: result.Profile, ProfileHome: result.ProfileHome, Loopback: listener.Addr().String()}
 		b, err := json.Marshal(plan)
 		if err != nil {
 			return err
@@ -242,7 +279,7 @@ func probe(base, executable string, args []string, safer, appContainer, trace, s
 		return err
 	}
 	defer token.Close()
-	result.Child, err = InspectToken(token)
+	result.Child, err = inspectProbeToken(token)
 	if err != nil {
 		return err
 	}
@@ -367,6 +404,9 @@ func probe(base, executable string, args []string, safer, appContainer, trace, s
 	if appContainer {
 		attrCount++
 	}
+	if result.LPAC {
+		attrCount++
+	}
 	attrs, err := windows.NewProcThreadAttributeList(attrCount)
 	if err != nil {
 		return err
@@ -388,9 +428,29 @@ func probe(base, executable string, args []string, safer, appContainer, trace, s
 		caps.Count = 1
 	}
 	if appContainer {
+		if len(result.Capabilities) > 0 {
+			capList, er := compatibilityCapabilities(result.Capabilities)
+			if er != nil {
+				return er
+			}
+			caps.Capabilities = &capList[0]
+			caps.Count = uint32(len(capList))
+			for _, cap := range capList {
+				result.CapabilitySIDs = append(result.CapabilitySIDs, cap.Sid.String())
+			}
+			defer runtime.KeepAlive(capList)
+		}
 		if err = attrs.Update(0x00020009, unsafe.Pointer(&caps), unsafe.Sizeof(caps)); err != nil {
 			return err
 		}
+	}
+	if result.LPAC {
+		optOut := uint32(1)
+		// ProcThreadAttributeAllApplicationPackagesPolicy = 15 (WinBase.h).
+		if err = attrs.Update(0x0002000f, unsafe.Pointer(&optOut), unsafe.Sizeof(optOut)); err != nil {
+			return err
+		}
+		defer runtime.KeepAlive(&optOut)
 	}
 	if err = attrs.Update(windows.PROC_THREAD_ATTRIBUTE_HANDLE_LIST, unsafe.Pointer(&handles[0]), uintptr(len(handles))*unsafe.Sizeof(handles[0])); err != nil {
 		return err
@@ -454,6 +514,15 @@ func probe(base, executable string, args []string, safer, appContainer, trace, s
 	if err != nil {
 		return err
 	}
+	if strings.HasPrefix(result.HomeMode, "prewarm") {
+		if !session {
+			return fmt.Errorf("prewarm requires credential-free session probe")
+		}
+		result.Prewarm, err = prewarmHome(appPath, args, env, root, result.SID, result.HomeMode == "prewarm-copy")
+		if err != nil {
+			return err
+		}
+	}
 	sort.Strings(env)
 	block := utf16.Encode([]rune(strings.Join(env, "\x00") + "\x00\x00"))
 	pi := windows.ProcessInformation{}
@@ -499,12 +568,12 @@ func probe(base, executable string, args []string, safer, appContainer, trace, s
 	if err = windows.OpenProcessToken(pi.Process, windows.TOKEN_QUERY, &childToken); err != nil {
 		return err
 	}
-	result.Child, err = InspectToken(childToken)
+	result.Child, err = inspectProbeToken(childToken)
 	childToken.Close()
 	if err != nil {
 		return err
 	}
-	if err = verifyToken(result.Child, result.SID); err != nil {
+	if err = verifyCompatibilityToken(result.Child, result); err != nil {
 		return err
 	}
 	var inJob int32
@@ -592,7 +661,7 @@ func probe(base, executable string, args []string, safer, appContainer, trace, s
 			return fmt.Errorf("descendant evidence missing")
 		}
 		for _, e := range []*childEvidence{&evidence, evidence.Descendant} {
-			if err = verifyToken(e.Token, result.SID); err != nil {
+			if err = verifyCompatibilityToken(e.Token, result); err != nil {
 				return err
 			}
 			if !e.InJob || !e.RelayOK || !e.RelayBadTokenRejected || !e.RelayRouteRejected || !e.TaskHTTPRelayOK || !e.RelayInstanceDenied || !e.RelayACLDenied {

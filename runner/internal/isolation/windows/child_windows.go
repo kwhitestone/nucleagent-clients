@@ -20,7 +20,7 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-type childPlan struct{ Root, Outside, Profile, Loopback, RelayPipe, RelayToken string }
+type childPlan struct{ Root, Outside, Profile, ProfileHome, Loopback, RelayPipe, RelayToken string }
 type childEvidence struct {
 	WindowStation, Desktop, DesktopError                                string
 	Token                                                               TokenEvidence
@@ -54,7 +54,7 @@ func ChildProbe(planPath string, descendant ...bool) error {
 	if err != nil {
 		e.DesktopError += err.Error()
 	}
-	e.Token, err = InspectToken(windows.GetCurrentProcessToken())
+	e.Token, err = inspectProbeToken(windows.GetCurrentProcessToken())
 	if err != nil {
 		return err
 	}
@@ -72,16 +72,22 @@ func ChildProbe(planPath string, descendant ...bool) error {
 	if profilePath != nil {
 		windows.NewLazySystemDLL("ole32.dll").NewProc("CoTaskMemFree").Call(uintptr(unsafe.Pointer(profilePath)))
 	}
-	// Locate the Rust canonicalize failure without granting ancestor access.
-	home, _ := windows.UTF16PtrFromString(filepath.Join(plan.Root, "home"))
-	homeHandle, homeErr := windows.CreateFile(home, 0, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, nil, windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS, 0)
-	e.Access = append(e.Access, AccessObservation{filepath.Join(plan.Root, "home"), "open directory metadata", fmt.Sprint(homeErr), homeErr == nil})
-	if homeErr == nil {
-		defer windows.CloseHandle(homeHandle)
-		for _, flags := range []uint32{0, 8, 1, 9, 2, 10, 4, 12} {
-			var path [32768]uint16
-			_, err := windows.GetFinalPathNameByHandle(homeHandle, &path[0], uint32(len(path)), flags)
-			e.Access = append(e.Access, AccessObservation{filepath.Join(plan.Root, "home"), fmt.Sprintf("GetFinalPathName flags=%d", flags), fmt.Sprint(err), err == nil})
+	// Compare output forms on each actually accessible home handle.
+	homePaths := []string{filepath.Join(plan.Root, "home")}
+	if plan.ProfileHome != "" {
+		homePaths = append(homePaths, plan.ProfileHome)
+	}
+	for _, homePath := range homePaths {
+		home, _ := windows.UTF16PtrFromString(homePath)
+		h, openErr := windows.CreateFile(home, 0, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, nil, windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS, 0)
+		e.Access = append(e.Access, AccessObservation{homePath, "open directory metadata", fmt.Sprint(openErr), openErr == nil})
+		if openErr == nil {
+			for _, flags := range []uint32{0, 8, 1, 9, 2, 10, 4, 12} {
+				var path [32768]uint16
+				_, err := windows.GetFinalPathNameByHandle(h, &path[0], uint32(len(path)), flags)
+				e.Access = append(e.Access, AccessObservation{homePath, fmt.Sprintf("GetFinalPathName flags=%d", flags), fmt.Sprint(err), err == nil})
+			}
+			windows.CloseHandle(h)
 		}
 	}
 	for _, path := range []string{filepath.Join(plan.Root, "workspace", "inside.txt"), filepath.Join(plan.Root, "tmp", "inside.txt"), filepath.Join(plan.Root, "runtime", "forbidden.txt"), filepath.Join(plan.Root, "control", "forbidden.txt"), filepath.Join(plan.Outside, "outside.txt"), filepath.Join(plan.Outside, "public-low", "outside.txt"), filepath.Join(plan.Root, "workspace", "..", "..", "outside.txt")} {
@@ -95,7 +101,18 @@ func ChildProbe(planPath string, descendant ...bool) error {
 			e.Access = append(e.Access, AccessObservation{path, "write", fmt.Sprint(err), err == nil})
 		}
 	}
-	for _, path := range []string{filepath.Join(plan.Outside, "sensitive-canary.txt"), filepath.Join(plan.Outside, "sibling-task", "sentinel.txt"), filepath.Join(plan.Root, "control", "sensitive-canary.txt"), filepath.Join(plan.Root, "runtime", filepath.Base(os.Args[0]))} {
+	if plan.ProfileHome != "" {
+		path := filepath.Join(plan.ProfileHome, "allowed.txt")
+		err := os.WriteFile(path, []byte("synthetic single-directory exception"), 0600)
+		e.Access = append(e.Access, AccessObservation{path, "write", fmt.Sprint(err), err == nil})
+		p, _ := windows.UTF16PtrFromString(path)
+		h, err := windows.CreateFile(p, windows.WRITE_DAC, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, nil, windows.OPEN_EXISTING, 0, 0)
+		e.Access = append(e.Access, AccessObservation{path, "WRITE_DAC", fmt.Sprint(err), err == nil})
+		if err == nil {
+			windows.CloseHandle(h)
+		}
+	}
+	for _, path := range []string{filepath.Join(plan.Root, "runtime", "aap-only.txt"), filepath.Join(plan.Outside, "sensitive-canary.txt"), filepath.Join(plan.Outside, "sibling-task", "sentinel.txt"), filepath.Join(plan.Root, "control", "sensitive-canary.txt"), filepath.Join(plan.Root, "runtime", filepath.Base(os.Args[0]))} {
 		f, err := os.Open(path)
 		e.Access = append(e.Access, AccessObservation{path, "read", fmt.Sprint(err), err == nil})
 		if err == nil {

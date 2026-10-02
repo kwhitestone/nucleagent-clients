@@ -28,6 +28,9 @@ type TokenEvidence struct {
 	Privileges                                               []windows.LUIDAndAttributes
 	Integrity                                                string
 	Package                                                  string
+	LessPrivilegedAppContainer                               uint32
+	LPACQueryError                                           string
+	NoAllAppPackages                                         uint64
 	MandatoryPolicy, Elevated, HasRestrictions, AppContainer uint32
 }
 

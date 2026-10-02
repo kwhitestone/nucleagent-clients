@@ -18,7 +18,7 @@ func probeHomeEnvironment(env []string, root string, result *ProbeResult) ([]str
 	home := filepath.Join(root, "home")
 	value := home
 	switch result.HomeMode {
-	case "dos":
+	case "dos", "prewarm", "prewarm-copy":
 		for _, entry := range env {
 			if strings.HasPrefix(entry, "CODEX_HOME=") {
 				result.CodexHome = strings.TrimPrefix(entry, "CODEX_HOME=")
@@ -44,6 +44,14 @@ func probeHomeEnvironment(env []string, root string, result *ProbeResult) ([]str
 			return nil, fmt.Errorf("profile mode requires AppContainer")
 		}
 		value = result.Profile // remains sealed read-only
+	case "profile-write", "profile-default":
+		if result.ProfileHome == "" {
+			return nil, fmt.Errorf("profile exception requires AppContainer")
+		}
+		value = result.ProfileHome
+		if result.HomeMode == "profile-default" {
+			value = ""
+		}
 	case "junction", "symlink":
 		value = filepath.Join(root, "home-alias")
 		if result.HomeMode == "symlink" {
@@ -70,8 +78,11 @@ func probeHomeEnvironment(env []string, root string, result *ProbeResult) ([]str
 	result.CodexHome = value
 	var out []string
 	for _, entry := range env {
+		if result.HomeMode == "profile-default" && (strings.HasPrefix(entry, "HOME=") || strings.HasPrefix(entry, "USERPROFILE=")) {
+			entry = strings.SplitN(entry, "=", 2)[0] + "=" + result.Profile
+		}
 		if strings.HasPrefix(entry, "CODEX_HOME=") {
-			if result.HomeMode == "unset" {
+			if result.HomeMode == "unset" || result.HomeMode == "profile-default" {
 				continue
 			}
 			entry = "CODEX_HOME=" + value
