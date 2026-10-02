@@ -24,6 +24,7 @@ func main() {
 	session := flag.Bool("session", false, "Codex empty session, no inference; requires -exe")
 	internet := flag.Bool("internet-client", false, "explicit AppContainer internetClient capability experiment")
 	ntHome := flag.Bool("nt-home", false, "diagnostic: use NT GLOBALROOT form for task environment paths")
+	homeMode := flag.String("home-mode", "dos", "diagnostic CODEX_HOME: dos, slash, extended, short, profile, junction, symlink, unset, empty")
 	flag.Parse()
 	if *child {
 		if err := isolation.ChildProbe(*plan, *descendant); err != nil {
@@ -57,7 +58,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "select one explicit candidate")
 		os.Exit(2)
 	}
-	result := isolation.Probe(*base, *exe, args, *safer, *appContainer, *trace, *session, *internet, *ntHome)
+	result := isolation.ProbeHome(*base, *exe, args, *safer, *appContainer, *trace, *session, *internet, *ntHome, *homeMode)
 	json.NewEncoder(os.Stdout).Encode(result)
 	if result.Error != "" {
 		os.Exit(1)

@@ -64,13 +64,21 @@ func ChildProbe(planPath string, descendant ...bool) error {
 		return er
 	}
 	e.InJob = inJob != 0
+	// Match dirs 6's Windows home lookup used by the fixed Codex release.
+	profileID := windows.GUID{Data1: 0x5e6c858f, Data2: 0x0e22, Data3: 0x4760, Data4: [8]byte{0x9a, 0xfe, 0xea, 0x33, 0x17, 0xb6, 0x71, 0x73}}
+	var profilePath *uint16
+	hr, _, _ := windows.NewLazySystemDLL("shell32.dll").NewProc("SHGetKnownFolderPath").Call(uintptr(unsafe.Pointer(&profileID)), 0, 0, uintptr(unsafe.Pointer(&profilePath)))
+	e.Access = append(e.Access, AccessObservation{"FOLDERID_Profile", "SHGetKnownFolderPath flags=0", fmt.Sprintf("HRESULT 0x%08x", uint32(hr)), int32(hr) >= 0})
+	if profilePath != nil {
+		windows.NewLazySystemDLL("ole32.dll").NewProc("CoTaskMemFree").Call(uintptr(unsafe.Pointer(profilePath)))
+	}
 	// Locate the Rust canonicalize failure without granting ancestor access.
 	home, _ := windows.UTF16PtrFromString(filepath.Join(plan.Root, "home"))
 	homeHandle, homeErr := windows.CreateFile(home, 0, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, nil, windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS, 0)
 	e.Access = append(e.Access, AccessObservation{filepath.Join(plan.Root, "home"), "open directory metadata", fmt.Sprint(homeErr), homeErr == nil})
 	if homeErr == nil {
 		defer windows.CloseHandle(homeHandle)
-		for _, flags := range []uint32{0, 8, 2, 10} {
+		for _, flags := range []uint32{0, 8, 1, 9, 2, 10, 4, 12} {
 			var path [32768]uint16
 			_, err := windows.GetFinalPathNameByHandle(homeHandle, &path[0], uint32(len(path)), flags)
 			e.Access = append(e.Access, AccessObservation{filepath.Join(plan.Root, "home"), fmt.Sprintf("GetFinalPathName flags=%d", flags), fmt.Sprint(err), err == nil})

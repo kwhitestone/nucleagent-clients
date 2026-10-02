@@ -25,6 +25,7 @@ import (
 )
 
 type ProbeResult struct {
+	HomeMode, CodexHome               string
 	ExecutableSHA256                  string
 	BrokerLoopbackOK                  bool
 	CleanupError                      string
@@ -50,6 +51,13 @@ type ProbeResult struct {
 // Probe is deliberately separate from platform.Start. A failed feasibility
 // probe cannot silently enable ordinary-user execution or a weaker policy.
 func Probe(base, executable string, args []string, safer, appContainer, trace, session, internetClient bool, ntHome ...bool) (result ProbeResult) {
+	return ProbeHome(base, executable, args, safer, appContainer, trace, session, internetClient, len(ntHome) == 1 && ntHome[0], "dos")
+}
+
+// ProbeHome varies only a disposable diagnostic's home resolution. It does not
+// change production admission or authorize reparse points in task paths.
+func ProbeHome(base, executable string, args []string, safer, appContainer, trace, session, internetClient, ntHome bool, homeMode string) (result ProbeResult) {
+	result.HomeMode = homeMode
 	result.Time = time.Now().UTC().Format(time.RFC3339Nano)
 	result.Mode = "restricted-token"
 	if safer {
@@ -61,8 +69,7 @@ func Probe(base, executable string, args []string, safer, appContainer, trace, s
 			result.Mode += "+internetClient"
 		}
 	}
-	useNT := len(ntHome) == 1 && ntHome[0]
-	err := probe(base, executable, args, safer, appContainer, trace, session, internetClient, useNT, &result)
+	err := probe(base, executable, args, safer, appContainer, trace, session, internetClient, ntHome, &result)
 	if err != nil {
 		result.Error = err.Error()
 	}
@@ -442,6 +449,10 @@ func probe(base, executable string, args []string, safer, appContainer, trace, s
 		for i := range env {
 			env[i] = strings.ReplaceAll(env[i], root, ntRoot)
 		}
+	}
+	env, err = probeHomeEnvironment(env, root, result)
+	if err != nil {
+		return err
 	}
 	sort.Strings(env)
 	block := utf16.Encode([]rune(strings.Join(env, "\x00") + "\x00\x00"))
