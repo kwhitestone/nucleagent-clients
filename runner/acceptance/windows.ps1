@@ -21,5 +21,5 @@ if ($Install) {
         if ($LASTEXITCODE -ne 0) { throw "$backend integrity failed" }
     }
 }
-@{ platform = 'Windows native'; realTasks = 0; e2e = 'NOT IMPLEMENTED: private-device bridge and Core routing required'; installRequested = [bool]$Install } | ConvertTo-Json | Set-Content -Encoding UTF8 "$EvidenceDirectory\scope.json"
-Write-Output 'Native diagnostics completed. This is not task or P0 acceptance. No model task was submitted.'
+@{ platform = 'Windows native'; realTasks = 0; e2e = 'NOT RUN: this script performs diagnostics/probes only'; installRequested = [bool]$Install } | ConvertTo-Json | Set-Content -Encoding UTF8 "$EvidenceDirectory\scope.json"
+Write-Output 'Native diagnostics completed. This is not task acceptance. No model task was submitted.'
