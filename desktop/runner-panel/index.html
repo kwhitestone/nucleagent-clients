@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>本机执行 · NucleAgent</title><link rel="stylesheet" href="panel.css"></head>
+<body>
+<main>
+<header><p class="eyebrow">NUCLEAGENT / 本机执行</p><h1>让任务在这台电脑运行</h1><p>原生运行时 · 单任务 · 空闲时不启动后端</p></header>
+<section aria-labelledby="status-title"><div class="section-title"><h2 id="status-title">设备状态</h2><button id="refresh" type="button">刷新</button></div><p id="identity" role="status">正在检查平台与权限…</p><p id="reason"></p><p class="notice">Codex 支持本机任务；结果须由 Core 持久化并确认后才完成。OpenCode 当前仅提供安装与协议检查。</p><p id="device"></p></section>
+<section aria-labelledby="backend-title"><h2 id="backend-title">准备执行后端</h2><p>从官方 GitHub 与 npm 下载固定版本，校验归档及文件闭包后创建空会话检查；不发送模型任务。</p><div id="backends"></div><progress id="progress" hidden></progress><p id="progress-text" role="status" aria-live="polite"></p></section>
+<section aria-labelledby="safety-title"><h2 id="safety-title">接单前请了解</h2><p>任务工具以你的当前用户权限运行，可能访问该用户可访问的其他文件、网络和程序。独立任务目录不构成安全隔离。不要使用管理员或 root 启动。</p><label><input id="consent" type="checkbox"> 我了解上述边界，允许绑定设备并运行我下发的本机任务。</label><label>Core 地址<input id="core-origin" type="url" placeholder="https://core.example.com"></label><p><button id="bind" type="button">绑定设备</button> <button id="start" type="button">开启 Codex 接单</button> <button id="stop" type="button">停止接单并取消当前任务</button> <button id="revoke" type="button">撤销绑定</button></p><p id="binding" role="status"></p></section>
+<section aria-labelledby="history-title"><h2 id="history-title">任务与产物</h2><label>主壳地址<input id="shell-origin" type="url" placeholder="https://nucleagent.example.com"></label><p>完整流式结果与产物保存在 Core。下列状态仅来自本次面板运行；“等待确认”仍未完成。</p><ul id="history"></ul></section>
+</main><script src="panel.js"></script>
+</body></html>

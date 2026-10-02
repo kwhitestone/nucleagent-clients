@@ -21,3 +21,13 @@ dist/
 *.exe
 .env
 .env.*
+
+.shell-build/
+.g6-work/
+
+# Generated native sidecars
+desktop/src-tauri/binaries/
+
+# Developer-only workspace overrides
+runner/go.work
+runner/go.work.sum

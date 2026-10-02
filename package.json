@@ -3,10 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "author": "Biwei.Lai <biwei.lai@qq.com>",
-  "description": "Remote desktop and Android shells for NucleAgent",
+  "description": "Local asset desktop and Android clients for NucleAgent",
   "scripts": {
     "check": "tsc --noEmit",
-    "android:sync": "cd mobile && cap sync android"
+    "android:sync": "cd mobile && cap sync android",
+    "shell:build": "bash scripts/build-shell.sh"
   },
   "dependencies": {
     "@capacitor/android": "6.2.2",
@@ -14,7 +15,9 @@
   },
   "devDependencies": {
     "@capacitor/cli": "6.2.2",
+    "@intlify/unplugin-vue-i18n": "4.0.0",
     "@types/node": "22.10.2",
-    "typescript": "5.7.3"
+    "typescript": "5.7.3",
+    "vue-i18n": "9.14.5"
   }
 }

@@ -3,33 +3,63 @@
   "productName": "NucleAgent",
   "version": "0.1.0",
   "identifier": "top.whitestone.nucleagent",
-  "build": {},
+  "build": {
+    "frontendDist": "../../dist/shell"
+  },
   "app": {
-    "withGlobalTauri": false,
-    "windows": [{
-      "label": "main",
-      "create": false,
-      "title": "NucleAgent",
-      "url": "https://nucleagent.whitestone.top",
-      "width": 1280,
-      "height": 800,
-      "minWidth": 640,
-      "minHeight": 480,
-      "resizable": true
-    }],
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "create": false,
+        "title": "NucleAgent",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 640,
+        "minHeight": 480,
+        "resizable": true
+      }
+    ],
     "security": {
-      "capabilities": [],
-      "csp": "default-src 'none'; frame-src https://whitestone.top https://*.whitestone.top; connect-src https://whitestone.top https://*.whitestone.top wss://*.whitestone.top; img-src 'self' data: https://*.whitestone.top; style-src 'self'; script-src 'self'; object-src 'none'; base-uri 'none'"
+      "capabilities": [
+        {
+          "identifier": "local-runner",
+          "description": "Only the packaged runner panel can bind, start and stop the native private runner.",
+          "windows": [
+            "local-runner"
+          ],
+          "local": true,
+          "permissions": [
+            "allow-runner-snapshot",
+            "allow-runner-install",
+            "allow-runner-control"
+          ]
+        }
+      ],
+      "csp": "default-src 'self'; frame-src https://whitestone.top https://*.whitestone.top; connect-src 'self' https://whitestone.top https://*.whitestone.top wss://*.whitestone.top; img-src 'self' data: blob: https://*.whitestone.top; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self' data:; object-src 'none'; base-uri 'self'"
     }
   },
   "bundle": {
     "active": true,
-    "targets": ["msi", "nsis"],
+    "targets": [
+      "msi",
+      "nsis"
+    ],
     "publisher": "Biwei.Lai",
-    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.ico"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico"
+    ],
     "shortDescription": "NucleAgent desktop client",
     "windows": {
-      "webviewInstallMode": { "type": "downloadBootstrapper" }
-    }
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      }
+    },
+    "externalBin": [
+      "binaries/nucleagent-runner"
+    ]
   }
 }
