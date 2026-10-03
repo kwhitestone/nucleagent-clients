@@ -16,13 +16,14 @@ type Spec struct {
 	Directory  string
 }
 type Process struct {
-	Stdin     io.WriteCloser
-	Stdout    io.ReadCloser
-	Stderr    io.ReadCloser
-	PID       int
-	done      chan struct{}
-	err       error
-	terminate func() error
+	Stdin      io.WriteCloser
+	Stdout     io.ReadCloser
+	Stderr     io.ReadCloser
+	PID        int
+	done       chan struct{}
+	err        error
+	cleanupErr error
+	terminate  func() error
 }
 
 func (s Spec) validate() error {
@@ -45,7 +46,7 @@ func (p *Process) Stop(ctx context.Context) error {
 	}
 	select {
 	case <-p.done:
-		return nil
+		return p.cleanupErr
 	case <-ctx.Done():
 		return errors.New("worker cleanup timed out")
 	}

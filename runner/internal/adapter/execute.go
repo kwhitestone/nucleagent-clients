@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -71,8 +72,11 @@ func ExecuteCodex(ctx context.Context, root, generation string, bundle catalog.B
 	if err != nil {
 		return
 	}
+	if err := platform.PrepareCodexConfig(root); err != nil {
+		return
+	}
 	workspace := filepath.Join(root, "workspace")
-	if err := platform.PrivateDirectory(filepath.Join(workspace, "artifacts")); err != nil {
+	if err := prepareArtifactDirectory(workspace); err != nil {
 		return result, true
 	}
 	args := []string{"app-server", "--listen", "stdio://", "-c", `model_provider="nucleagent"`, "-c", `model_providers.nucleagent.name="NucleAgent"`, "-c", `model_providers.nucleagent.base_url="` + endpoint + `"`, "-c", `model_providers.nucleagent.wire_api="responses"`, "-c", `model_providers.nucleagent.requires_openai_auth=false`, "-c", `model_providers.nucleagent.env_key="NUCLEAGENT_LOOPBACK_TOKEN"`, "-c", `model_providers.nucleagent.supports_websockets=false`, "-c", `features.multi_agent=false`, "-c", `features.apps=false`, "-c", `features.web_search_request=false`, "-c", `web_search="disabled"`, "-c", `analytics.enabled=false`}
@@ -89,7 +93,7 @@ func ExecuteCodex(ctx context.Context, root, generation string, bundle catalog.B
 	if r.notify("initialized", nil) != nil {
 		return result, clean
 	}
-	raw, err := r.call(ctx, "thread/start", map[string]any{"model": request.Model, "modelProvider": "nucleagent", "cwd": workspace, "approvalPolicy": "never", "sandbox": "workspace-write", "ephemeral": true, "developerInstructions": "Save final deliverable files in the artifacts directory. Do not use subagents, browsers, desktop tools or plugins."})
+	raw, err := r.call(ctx, "thread/start", map[string]any{"model": request.Model, "modelProvider": "nucleagent", "cwd": workspace, "approvalPolicy": "never", "ephemeral": true, "developerInstructions": "Save final deliverable files in the artifacts directory. Do not use subagents, browsers, desktop tools or plugins."})
 	if err != nil {
 		return result, clean
 	}
@@ -99,6 +103,10 @@ func ExecuteCodex(ctx context.Context, root, generation string, bundle catalog.B
 		} `json:"thread"`
 	}
 	if json.Unmarshal(raw, &started) != nil || started.Thread.ID == "" {
+		return result, clean
+	}
+	if err := validateSandbox(raw); err != nil {
+		result.ErrorCode = "sandbox_policy_mismatch"
 		return result, clean
 	}
 	state := &codexTurn{thread: started.Thread.ID, emit: emit, redact: func(value string) string { return strings.ReplaceAll(value, token, "[redacted]") }}
@@ -151,4 +159,10 @@ func ExecuteCodex(ctx context.Context, root, generation string, bundle catalog.B
 		result.Status, result.ErrorCode = "cancelled", "execution_cancelled"
 	}
 	return result, clean
+}
+
+// Inherit the private workspace ACL, including Codex sandbox grants added at
+// launch. A protected child DACL would block the restricted worker token.
+func prepareArtifactDirectory(workspace string) error {
+	return os.MkdirAll(filepath.Join(workspace, "artifacts"), 0700)
 }

@@ -75,3 +75,5 @@ func PrivateDirectory(dir string) error {
 	}
 	return os.Chmod(dir, 0700)
 }
+
+func taskIsolationAvailable() error { return nil }

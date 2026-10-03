@@ -4,7 +4,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"os"
 	"testing"
 
@@ -14,9 +13,9 @@ import (
 	"nucleagent-desktop-runner/internal/vault"
 )
 
-func TestWindowsIsolationAdmissionBeforeCredentialsAndTask(t *testing.T) {
+func TestWindowsInvalidGenerationRefusedBeforeTask(t *testing.T) {
 	root := t.TempDir()
-	if err := runBridge(context.Background(), root, "missing", catalog.Bundle{}); !errors.Is(err, platform.ErrIsolationUnavailable) {
+	if err := platform.RequireTaskIsolation(); err != nil {
 		t.Fatalf("bridge admitted without isolation: %v", err)
 	}
 	emitted := false

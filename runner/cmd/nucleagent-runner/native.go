@@ -101,6 +101,9 @@ func runBridge(ctx context.Context, root, generation string, bundle catalog.Bund
 	if err := platform.RequireTaskIsolation(); err != nil {
 		return err
 	}
+	if runtime.GOOS == "windows" && (bundle.WindowsSandbox != "unelevated" || bundle.AdapterVersion != "2") {
+		return platform.ErrIsolationUnavailable
+	}
 	vaultStore, err := vault.New(filepath.Join(root, "credential"))
 	if err != nil {
 		return err
@@ -219,7 +222,7 @@ func runBridge(ctx context.Context, root, generation string, bundle catalog.Bund
 func executeNative(root, generation string, bundle catalog.Bundle, credential vault.Credential, client *device.Client) bridge.Execute {
 	return func(ctx context.Context, request a2a.ExecutionRequest, backend, selectedGeneration string, emitEvent func(a2a.A2AStreamEventPayload) error) bridge.Outcome {
 		out := bridge.Outcome{Result: a2a.ExecutionResult{StepID: request.StepID, Status: "failed", ErrorCode: "native_execution_failed"}, Clean: true, Integrity: true}
-		if platform.RequireTaskIsolation() != nil {
+		if platform.RequireTaskIsolation() != nil || runtime.GOOS == "windows" && (bundle.WindowsSandbox != "unelevated" || bundle.AdapterVersion != "2") {
 			out.Result.ErrorCode = "isolation_unavailable"
 			return out
 		}

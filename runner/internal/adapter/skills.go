@@ -67,6 +67,15 @@ func extractSkill(destination string, data []byte) error {
 	if err != nil || len(archive.File) > 512 {
 		return errors.New("invalid skill archive")
 	}
+	// SkillHub packages may wrap all entries in the exact selected slug.
+	// Preserve the ZIP checksum and strip only that one verified directory.
+	prefix := filepath.Base(destination) + "/"
+	for _, file := range archive.File {
+		if file.Name == "SKILL.md" {
+			prefix = ""
+			break
+		}
+	}
 	seen := map[string]bool{}
 	var total uint64
 	found := false
@@ -74,6 +83,18 @@ func extractSkill(destination string, data []byte) error {
 		name := strings.TrimSuffix(file.Name, "/")
 		if !catalog.Relative(name) || file.Mode()&os.ModeSymlink != 0 || !file.Mode().IsRegular() && !file.FileInfo().IsDir() || seen[strings.ToLower(name)] {
 			return errors.New("unsafe skill entry")
+		}
+		if prefix != "" {
+			if file.FileInfo().IsDir() && name == strings.TrimSuffix(prefix, "/") {
+				continue
+			}
+			if !strings.HasPrefix(name, prefix) {
+				return errors.New("skill archive has an unexpected root")
+			}
+			name = strings.TrimPrefix(name, prefix)
+			if !catalog.Relative(name) || seen[strings.ToLower(name)] {
+				return errors.New("unsafe skill entry")
+			}
 		}
 		seen[strings.ToLower(name)] = true
 		total += file.UncompressedSize64

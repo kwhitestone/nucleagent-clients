@@ -34,6 +34,9 @@ func Probe(ctx context.Context, generation string, b catalog.Bundle) (err error)
 	if err != nil {
 		return err
 	}
+	if err := platform.PrepareCodexConfig(root); err != nil {
+		return err
+	}
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return err
@@ -60,7 +63,7 @@ func Probe(ctx context.Context, generation string, b catalog.Bundle) (err error)
 	if err = r.notify("initialized", nil); err != nil {
 		return err
 	}
-	raw, err := r.call(deadline, "thread/start", map[string]any{"model": "fixture-only", "modelProvider": "nucleagent_probe", "cwd": filepath.Join(root, "workspace"), "approvalPolicy": "never", "sandbox": "read-only", "ephemeral": true})
+	raw, err := r.call(deadline, "thread/start", map[string]any{"model": "fixture-only", "modelProvider": "nucleagent_probe", "cwd": filepath.Join(root, "workspace"), "approvalPolicy": "never", "ephemeral": true})
 	if err != nil {
 		return err
 	}
@@ -71,6 +74,9 @@ func Probe(ctx context.Context, generation string, b catalog.Bundle) (err error)
 	}
 	if json.Unmarshal(raw, &out) != nil || out.Thread.ID == "" {
 		return errors.New("CLI returned no empty session identity")
+	}
+	if err := validateSandbox(raw); err != nil {
+		return err
 	}
 	_, err = r.call(deadline, "thread/unsubscribe", map[string]any{"threadId": out.Thread.ID})
 	return err
@@ -86,6 +92,11 @@ func Version(ctx context.Context, generation string, b catalog.Bundle) error {
 	env, err := platform.Environment(root, nil)
 	if err != nil {
 		return err
+	}
+	if b.Backend == "codex" {
+		if err := platform.PrepareCodexConfig(root); err != nil {
+			return err
+		}
 	}
 	p, err := platform.Start(platform.Spec{Executable: filepath.Join(generation, b.Entry), Args: []string{"--version"}, Env: env, Directory: filepath.Join(root, "workspace")})
 	if err != nil {

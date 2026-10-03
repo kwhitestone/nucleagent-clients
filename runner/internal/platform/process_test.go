@@ -3,12 +3,10 @@ package platform
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -38,14 +36,12 @@ func TestExplicitEnvironmentAndWorkerCleanup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := PrepareCodexConfig(root); err != nil {
+		t.Fatal(err)
+	}
 	env = append(env, "G9_TEST_WORKER=1")
 	p, err := Start(Spec{Executable: exe, Args: []string{"-test.run=^TestWorkerFixture$"}, Env: env, Directory: filepath.Join(root, "workspace")})
-	if runtime.GOOS == "windows" {
-		if p != nil || !errors.Is(err, ErrIsolationUnavailable) {
-			t.Fatalf("Windows worker must fail closed: %v", err)
-		}
-		return
-	}
+
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -66,6 +66,47 @@ folder/NucleAgent/runner on macOS. The application lock prevents concurrent
 installation, vault mutation or duplicate runners. Task homes and workspaces
 are private, but their paths do not constitute an OS security sandbox.
 
+Windows Codex sandbox (per-task configuration)
+The broker precreates <task>/home/codex/config.toml, which is the worker's actual
+CODEX_HOME. It never edits the user's global Codex configuration:
+
+  approval_policy = "never"
+  sandbox_mode = "workspace-write"
+  [windows]
+  sandbox = "unelevated"
+
+Codex 0.149.1 resolves workspace-write to readOnly when its Windows sandbox
+implementation is disabled. A writable workspace, external Job/token, TEMP/TMP,
+or omitting the thread/start sandbox field does not enable that implementation.
+The fixed-version source is config/src/config_toml.rs at rust-v0.149.1; see also
+https://learn.chatgpt.com/docs/windows/windows-sandbox . The native unelevated
+mode uses restricted tokens and ACLs, with weaker network controls than elevated.
+
+The Windows production launcher requires task-local canonical configuration,
+verified private directory ACLs, a random private desktop, and atomic Job
+membership before resuming a worker. Missing prerequisites fail closed. The Job
+caps the process tree and is killed on broker exit; normal cleanup waits for all
+descendants before closing the desktop. The adapter refuses a non-workspaceWrite
+thread/start response before turn/start. The outer app-server remains a trusted
+same-user process: private desktop means a separate launch desktop, not a claim
+that its user identity cannot open other desktops. Task ACLs provide privacy
+from other users, not protection from the same user. Write-scope enforcement
+belongs to Codex's sandboxed tool children. No AppContainer isolation is claimed.
+
+The AppContainer/B-prime probes remain under internal/isolation/windows and the
+separate windows-isolation-probe command. Production never imports this package.
+Do not invoke a diagnostic helper as an execution backend. Windows OpenCode task
+execution remains unsupported. The signed Codex Windows catalog declares adapter
+version 2 and windowsSandbox=unelevated; old declarations cannot register tasks.
+
+Credential-free composition verification (native Windows test binary):
+  Set G9_WINDOWS_CODEX_FIXTURE to the hash-verified 0.149.1 codex.exe, then run
+  the adapter tests with -test.run=TestWindowsCodexSandbox -test.v. This checks
+  effective policy, actual workspace write, and denial of an outside canary
+  through the production launcher without model inference. This test must pass
+  on the deployment host before spending a real-task budget. Cross-build success
+  alone is insufficient. Native acceptance status belongs in the deployment report.
+
 Acknowledgements and recovery
 - Acceptance: the generation (conversation/step/nonce and original request ID)
   is fsynced before a2a_response 200 and before worker launch.
@@ -126,3 +167,40 @@ is not upstream publisher signing. macOS cross builds use an ad-hoc signature;
 Developer ID signing, notarization, real-machine smoke and crash recovery need a
 native release environment. The Windows standard-user E2E must be evidenced
 separately; this manual does not certify that an installation has passed it.
+
+Private-runner skill delivery contract
+
+Core sends each private task a short-lived absolute HTTPS URL that returns ZIP
+bytes directly, together with the selected skill ID, slug, version and SHA256.
+It resolves this URL only for a bound private device; shared server executors
+retain their authenticated S2S download-resolution contract. Resolution failure,
+changed skill identity, HTTP, missing host, userinfo or fragment fails dispatch
+before credentials or execution are issued. Never log signed URLs or forward
+the shared executor credential to a PC.
+
+The runner verifies the original ZIP checksum before extraction. Packages may
+contain SKILL.md at the root or use exactly one wrapper directory named after
+the selected slug. Only that verified prefix is removed; unexpected mixed roots,
+traversal, symlinks, case collisions and excessive sizes remain rejected. Run
+the archive tests and the optional Windows package fixture before paid E2E. The
+fixture accepts a binding over stdin and must not persist the signed URL.
+
+Artifact directory and completion checks
+
+Create workspace/artifacts with an inheritable ACL beneath the protected private
+workspace. Do not apply PrivateDirectory to that child: its protected user-only
+DACL blocks Codex's restricted sandbox SID even when workspace itself is writable.
+The broker must still be able to read the resulting file for upload. The native
+sandbox fixture tests the precreated nested directory, broker readback, and an
+unchanged outside canary; root-workspace writes alone are insufficient evidence.
+
+On Core, private artifact persistence locks both Conversation and Step. A GORM
+query containing Clauses must use a reusable Session before querying different
+models; otherwise the Conversation table and predicates leak into the Step query.
+Preserve FOR UPDATE and the existing transaction. Test repeated completion,
+checksum conflict, receipt fencing, and the locking branch, since plain SQLite
+queries alone do not exercise this statement-reuse failure.
+
+Acceptance requires upload, Core artifact completion HTTP 200, persisted artifact
+projection, terminal receipt/ACK, and downloadable bytes matching the local hash.
+Storage PUT 200 or registration 201 alone is insufficient.

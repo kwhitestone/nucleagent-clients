@@ -1,18 +1,9 @@
 package platform
 
-import (
-	"errors"
-	"runtime"
-)
+import "errors"
 
-var ErrIsolationUnavailable = errors.New("isolation_unavailable: Windows AppContainer CLI initialization has not passed admission")
+var ErrIsolationUnavailable = errors.New("isolation_unavailable: Windows task requires Job, private desktop, private ACL and task-local unelevated config")
 
-// RequireTaskIsolation is not configurable. Windows must not execute a worker
-// through the old Job-only path while the isolated CLI cannot initialize.
-// Other platforms retain their existing policy; macOS isolation remains P1.
-func RequireTaskIsolation() error {
-	if runtime.GOOS == "windows" {
-		return ErrIsolationUnavailable
-	}
-	return nil
-}
+// Registration checks platform support; Start enforces all per-task prerequisites
+// before resuming a worker. Diagnostic isolation packages are never imported.
+func RequireTaskIsolation() error { return taskIsolationAvailable() }

@@ -20,6 +20,15 @@ type rpcMessage struct {
 	Error  json.RawMessage `json:"error,omitempty"`
 }
 
+// Preserve the response for credential-free diagnostics; Error deliberately
+// omits remote text because production responses may contain sensitive data.
+type protocolError struct {
+	method   string
+	response json.RawMessage
+}
+
+func (e *protocolError) Error() string { return "CLI rejected protocol request: " + e.method }
+
 type rpc struct {
 	p        *platform.Process
 	mu       sync.Mutex
@@ -92,7 +101,7 @@ func (r *rpc) call(ctx context.Context, method string, params any) (json.RawMess
 				continue
 			}
 			if len(msg.Error) > 0 && string(msg.Error) != "null" {
-				return nil, errors.New("CLI rejected protocol request: " + method)
+				return nil, &protocolError{method: method, response: append(json.RawMessage(nil), msg.Error...)}
 			}
 			return msg.Result, nil
 		}

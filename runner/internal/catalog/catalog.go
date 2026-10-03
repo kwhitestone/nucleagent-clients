@@ -32,6 +32,8 @@ type Catalog struct {
 }
 
 type Bundle struct {
+	WindowsSandbox string     `json:"windowsSandbox,omitempty"`
+	Compatibility  string     `json:"compatibility,omitempty"`
 	ID             string     `json:"id"`
 	Backend        string     `json:"backend"`
 	OS             string     `json:"os"`
