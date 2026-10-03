@@ -27,6 +27,7 @@ import (
 type ProbeResult struct {
 	CompatibilityOptions
 	CapabilitySIDs                    []string
+	BasicPathSecurity                 map[string]string
 	Prewarm                           *PrewarmEvidence
 	HomeMode, CodexHome               string
 	ExecutableSHA256                  string
@@ -64,6 +65,10 @@ func ProbeHome(base, executable string, args []string, safer, appContainer, trac
 	if len(options) == 1 {
 		result.CompatibilityOptions = options[0]
 	}
+	if result.BasicToken && (appContainer || safer || trace || internetClient || ntHome || homeMode != "dos" || result.LPAC || len(result.Capabilities) != 0) {
+		result.Error = "basic token probe cannot combine with other candidates or home workarounds"
+		return
+	}
 	if len(options) > 1 || ((!appContainer || internetClient) && (result.LPAC || len(result.Capabilities) > 0)) {
 		result.Error = "compatibility options require AppContainer without internetClient"
 		return
@@ -71,6 +76,9 @@ func ProbeHome(base, executable string, args []string, safer, appContainer, trac
 	result.HomeMode = homeMode
 	result.Time = time.Now().UTC().Format(time.RFC3339Nano)
 	result.Mode = "restricted-token"
+	if result.BasicToken {
+		result.Mode = "basic-token+low-il+private-desktop+job"
+	}
 	if safer {
 		result.Mode = "safer-constrained+restricted-token"
 	}
@@ -256,7 +264,20 @@ func probe(base, executable string, args []string, safer, appContainer, trace, s
 		if !result.BrokerLoopbackOK {
 			return fmt.Errorf("broker loopback fixture failed")
 		}
-		plan := childPlan{Root: root, Outside: outside, Profile: result.Profile, ProfileHome: result.ProfileHome, Loopback: listener.Addr().String()}
+		if result.BasicToken {
+			if err = prepareBasicDeniedCanary(filepath.Join(outside, "acl-denied-low")); err != nil {
+				return err
+			}
+			result.BasicPathSecurity = make(map[string]string)
+			for _, path := range []string{root, filepath.Join(root, "workspace"), filepath.Join(root, "runtime"), filepath.Join(root, "control"), outside, filepath.Join(outside, "public-low"), filepath.Join(outside, "acl-denied-low"), filepath.Join(outside, "acl-denied-low", "outside.txt")} {
+				sd, er := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.LABEL_SECURITY_INFORMATION)
+				if er != nil {
+					return er
+				}
+				result.BasicPathSecurity[path] = sd.String()
+			}
+		}
+		plan := childPlan{Root: root, Outside: outside, Profile: result.Profile, ProfileHome: result.ProfileHome, Loopback: listener.Addr().String(), BasicToken: result.BasicToken}
 		b, err := json.Marshal(plan)
 		if err != nil {
 			return err
@@ -270,7 +291,7 @@ func probe(base, executable string, args []string, safer, appContainer, trace, s
 	result.Stage = "token"
 	tokenSID := sid
 	expectedSID := result.SID
-	if appContainer {
+	if appContainer || result.BasicToken {
 		tokenSID = nil
 		expectedSID = ""
 	}
@@ -285,6 +306,11 @@ func probe(base, executable string, args []string, safer, appContainer, trace, s
 	}
 	if err = verifyToken(result.Child, expectedSID); err != nil {
 		return err
+	}
+	if result.BasicToken {
+		if err = verifyBasicToken(result.Child); err != nil {
+			return err
+		}
 	}
 	if !appContainer {
 		result.Access, err = accessProbe(token, root)
@@ -313,6 +339,10 @@ func probe(base, executable string, args []string, safer, appContainer, trace, s
 	limits.BasicLimitInformation.LimitFlags = windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | windows.JOB_OBJECT_LIMIT_ACTIVE_PROCESS | windows.JOB_OBJECT_LIMIT_JOB_MEMORY
 	limits.BasicLimitInformation.ActiveProcessLimit = 8
 	limits.JobMemoryLimit = 512 << 20
+	if result.BasicToken {
+		limits.BasicLimitInformation.ActiveProcessLimit = 64
+		limits.JobMemoryLimit = 2 << 30
+	}
 	if _, err = windows.SetInformationJobObject(job, windows.JobObjectExtendedLimitInformation, uintptr(unsafe.Pointer(&limits)), uint32(unsafe.Sizeof(limits))); err != nil {
 		return err
 	}
@@ -588,7 +618,7 @@ func probe(base, executable string, args []string, safer, appContainer, trace, s
 	if err = windows.QueryInformationJobObject(job, windows.JobObjectExtendedLimitInformation, uintptr(unsafe.Pointer(&result.Job)), uint32(unsafe.Sizeof(result.Job)), nil); err != nil {
 		return err
 	}
-	if result.Job.BasicLimitInformation.LimitFlags != limits.BasicLimitInformation.LimitFlags || result.Job.BasicLimitInformation.ActiveProcessLimit != 8 || result.Job.JobMemoryLimit != 512<<20 {
+	if result.Job.BasicLimitInformation.LimitFlags != limits.BasicLimitInformation.LimitFlags || result.Job.BasicLimitInformation.ActiveProcessLimit != limits.BasicLimitInformation.ActiveProcessLimit || result.Job.JobMemoryLimit != limits.JobMemoryLimit {
 		return fmt.Errorf("job policy mismatch")
 	}
 	if err = windows.QueryInformationJobObject(job, 15, uintptr(unsafe.Pointer(&cpu)), 8, nil); err != nil {
@@ -651,6 +681,9 @@ func probe(base, executable string, args []string, safer, appContainer, trace, s
 	}
 	if result.SessionError != "" {
 		return fmt.Errorf("session: %s", result.SessionError)
+	}
+	if result.BasicToken && len(args) > 0 && args[0] == "-child" {
+		return verifyBasicBoundary(result)
 	}
 	if appContainer && !internetClient && len(args) > 0 && args[0] == "-child" {
 		var evidence childEvidence

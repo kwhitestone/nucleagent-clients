@@ -20,7 +20,10 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-type childPlan struct{ Root, Outside, Profile, ProfileHome, Loopback, RelayPipe, RelayToken string }
+type childPlan struct {
+	Root, Outside, Profile, ProfileHome, Loopback, RelayPipe, RelayToken string
+	BasicToken                                                           bool
+}
 type childEvidence struct {
 	WindowStation, Desktop, DesktopError                                string
 	Token                                                               TokenEvidence
@@ -64,6 +67,9 @@ func ChildProbe(planPath string, descendant ...bool) error {
 		return er
 	}
 	e.InJob = inJob != 0
+	if plan.BasicToken {
+		e.Access = append(e.Access, hostDesktopProbe()...)
+	}
 	// Match dirs 6's Windows home lookup used by the fixed Codex release.
 	profileID := windows.GUID{Data1: 0x5e6c858f, Data2: 0x0e22, Data3: 0x4760, Data4: [8]byte{0x9a, 0xfe, 0xea, 0x33, 0x17, 0xb6, 0x71, 0x73}}
 	var profilePath *uint16
@@ -92,6 +98,11 @@ func ChildProbe(planPath string, descendant ...bool) error {
 	}
 	for _, path := range []string{filepath.Join(plan.Root, "workspace", "inside.txt"), filepath.Join(plan.Root, "tmp", "inside.txt"), filepath.Join(plan.Root, "runtime", "forbidden.txt"), filepath.Join(plan.Root, "control", "forbidden.txt"), filepath.Join(plan.Outside, "outside.txt"), filepath.Join(plan.Outside, "public-low", "outside.txt"), filepath.Join(plan.Root, "workspace", "..", "..", "outside.txt")} {
 		err := os.WriteFile(path, []byte("synthetic isolation canary"), 0600)
+		e.Access = append(e.Access, AccessObservation{path, "write", fmt.Sprint(err), err == nil})
+	}
+	if plan.BasicToken {
+		path := filepath.Join(plan.Outside, "acl-denied-low", "outside.txt")
+		err := os.WriteFile(path, []byte("synthetic ACL-deny canary"), 0600)
 		e.Access = append(e.Access, AccessObservation{path, "write", fmt.Sprint(err), err == nil})
 	}
 	if plan.Profile != "" {

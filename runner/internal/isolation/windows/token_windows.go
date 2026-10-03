@@ -22,6 +22,7 @@ type Group struct {
 	Attributes uint32
 }
 type TokenEvidence struct {
+	UserSID                                                  string
 	Restricted                                               []Group
 	Capabilities                                             []Group
 	Groups                                                   []Group
@@ -46,6 +47,11 @@ func tokenInfo(t windows.Token, class uint32) ([]byte, error) {
 }
 
 func InspectToken(t windows.Token) (e TokenEvidence, err error) {
+	u, err := t.GetTokenUser()
+	if err != nil {
+		return e, err
+	}
+	e.UserSID = u.User.Sid.String()
 	for _, item := range []struct {
 		class uint32
 		dst   *[]Group

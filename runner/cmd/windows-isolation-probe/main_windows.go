@@ -28,6 +28,7 @@ func main() {
 	homeMode := flag.String("home-mode", "dos", "diagnostic CODEX_HOME: dos, prewarm, prewarm-copy, slash, extended, short, profile, profile-write, profile-default, junction, symlink, unset, empty")
 	capNames := flag.String("capabilities", "", "diagnostic allowlisted capability names, comma-separated")
 	lpac := flag.Bool("lpac", false, "diagnostic Less Privileged AppContainer")
+	basic := flag.Bool("basic-token", false, "B' diagnostic: drop privileges/high groups, Low IL, no restricting SID; never production admission")
 	flag.Parse()
 	if *child {
 		if err := isolation.ChildProbe(*plan, *descendant); err != nil {
@@ -65,7 +66,7 @@ func main() {
 	if *capNames != "" {
 		names = strings.Split(*capNames, ",")
 	}
-	result := isolation.ProbeHome(*base, *exe, args, *safer, *appContainer, *trace, *session, *internet, *ntHome, *homeMode, isolation.CompatibilityOptions{Capabilities: names, LPAC: *lpac})
+	result := isolation.ProbeHome(*base, *exe, args, *safer, *appContainer, *trace, *session, *internet, *ntHome, *homeMode, isolation.CompatibilityOptions{Capabilities: names, LPAC: *lpac, BasicToken: *basic})
 	json.NewEncoder(os.Stdout).Encode(result)
 	if result.Error != "" {
 		os.Exit(1)

@@ -14,6 +14,7 @@ import (
 type CompatibilityOptions struct {
 	Capabilities []string
 	LPAC         bool
+	BasicToken   bool // B' diagnostic only: no restricting SID; no admission grant.
 }
 
 func compatibilityCapabilities(names []string) ([]windows.SIDAndAttributes, error) {
@@ -59,6 +60,9 @@ func compatibilityCapabilities(names []string) ([]windows.SIDAndAttributes, erro
 }
 
 func verifyCompatibilityToken(e TokenEvidence, r *ProbeResult) error {
+	if r.BasicToken {
+		return verifyBasicToken(e)
+	}
 	if len(r.CapabilitySIDs) == 0 && !r.LPAC {
 		return verifyToken(e, r.SID)
 	}

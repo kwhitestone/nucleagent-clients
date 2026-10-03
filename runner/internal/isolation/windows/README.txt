@@ -1,7 +1,23 @@
 Windows isolation feasibility probes — G9-ISO, 2026-10-02
 
 STATUS: experimental diagnostics plus fail-closed Windows task admission.
-The pinned CLI still cannot initialize; P5 is blocked.
+AppContainer is archived for the stock Codex route (G9-ISO-B, 2026-10-03).
+See https://github.com/openai/codex/issues/45871 and the historical evidence in
+whitestone-stack/reports/ticket-g9-iso/stage3/alternatives/. Its framework and
+tests remain for reproducibility, not as a production fallback.
+
+B' (-basic-token) removes privileges/high groups without any restricting SID,
+uses Low IL, a private window station/desktop, and a 64-process/2-GiB Job.
+Codex 0.149.1 initializes successfully, but thread/start still returns readOnly.
+Native child AND descendant write an outside-root Low IL canary and can reopen
+WinSta0\\Default to enumerate windows. Explicit deny on a disposable Low IL
+canary works, but task-root ACLs do not deny ambient same-user access elsewhere.
+B' is therefore rejected as a production sandbox. The boundary probe exits
+nonzero with all observations preserved. No task admission or catalog claim
+may be enabled from its successful version/initialization/workspace checks.
+See whitestone-stack/reports/ticket-g9-iso-b/REPORT.txt for scope and limitations.
+
+The following sections describe the earlier AppContainer/complete-SID probes:
 Do not connect this package to platform.Start/admission until the design gates
 pass. Neither an exit-zero diagnostic nor a successful --version authorizes a
 task. Stage 3 now replaces the Windows platform.Start Job-only launch with an
