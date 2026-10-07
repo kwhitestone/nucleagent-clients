@@ -59,7 +59,7 @@ func TestBindingProofAndPrivateRegistration(t *testing.T) {
 			}
 			out = credential
 		case a2a.PCNativePath + "/register":
-			if r.Header.Get("Authorization") != "Bearer "+credential.Token {
+			if r.Header.Get("Authorization") != credential.Token {
 				t.Error("missing device auth")
 			}
 			out = a2a.PCRegistration{DeviceID: credential.DeviceID, InstanceID: credential.InstanceID, PCContract: a2a.PCContractV1, WSURL: "wss" + strings.TrimPrefix(origin, "https") + a2a.PCNativePath + "/ws"}

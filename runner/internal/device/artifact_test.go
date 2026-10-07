@@ -35,7 +35,7 @@ func TestArtifactUploadSeparatesDeviceAndStorageCredentials(t *testing.T) {
 			w.WriteHeader(204)
 			return
 		}
-		if r.Header.Get("Authorization") != "Bearer pcd_fixture" || r.Header.Get("X-Artifact-Token") != "run-fixture" {
+		if r.Header.Get("Authorization") != "pcd_fixture" || r.Header.Get("X-Artifact-Token") != "run-fixture" {
 			t.Error("missing device/run authorization")
 		}
 		var out any

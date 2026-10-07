@@ -64,7 +64,7 @@ func (c *Client) callWithArtifact(ctx context.Context, route, token, artifact st
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Authorization", token) // bare: PREPROD/PROD Kong 403s any Bearer prefix
 	}
 	if artifact != "" {
 		req.Header.Set("X-Artifact-Token", artifact)

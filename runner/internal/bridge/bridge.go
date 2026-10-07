@@ -89,7 +89,7 @@ func Dial(ctx context.Context, endpoint string, credential vault.Credential) (*w
 		return nil, errors.New("untrusted private websocket endpoint")
 	}
 	d := websocket.Dialer{HandshakeTimeout: 15 * time.Second, Proxy: http.ProxyFromEnvironment}
-	ws, res, err := d.DialContext(ctx, endpoint, http.Header{"Authorization": []string{"Bearer " + credential.Token}})
+	ws, res, err := d.DialContext(ctx, endpoint, http.Header{"Authorization": []string{credential.Token}}) // bare: Kong 403s Bearer
 	if res != nil && res.Body != nil {
 		res.Body.Close()
 	}
