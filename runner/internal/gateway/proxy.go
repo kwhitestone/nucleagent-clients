@@ -1,6 +1,9 @@
-// Package llmproxy keeps the Core execution key in runner memory. Workers see
-// only a random per-task loopback capability, invalidated on task termination.
-package llmproxy
+// Package gateway keeps the gateway key Core minted for this conversation in
+// runner memory and forwards the worker's model calls to 目鱼网关 (the
+// gateway base Core sends as ExecutionRequest.GatewayBase, from its
+// GATEWAY_PUBLIC_URL). Workers see only a random per-task loopback capability,
+// invalidated on task termination. There is no Core relay and no fixed key.
+package gateway
 
 import (
 	"bytes"
@@ -18,9 +21,16 @@ import (
 	"time"
 )
 
+// ErrGatewayUnconfigured: Core sent no gateway base (GATEWAY_PUBLIC_URL unset
+// or an older Core). ErrGatewayKeyMissing: Core sent no minted key.
+var (
+	ErrGatewayUnconfigured = errors.New("gateway base missing: Core GATEWAY_PUBLIC_URL is not configured")
+	ErrGatewayKeyMissing   = errors.New("gateway key missing: Core did not mint a conversation key")
+)
+
 type Scope struct {
-	CoreOrigin      string
-	Key             string
+	GatewayBase     string // HTTPS API base including /v1, e.g. https://gateway.example/v1
+	Key             string // conversation key minted by Core through the gateway
 	Model           string
 	MaxOutputTokens int
 	API             string // responses or chat/completions, fixed by the backend
@@ -35,9 +45,15 @@ type Proxy struct {
 }
 
 func Start(ctx context.Context, scope Scope) (*Proxy, error) {
-	u, err := url.Parse(scope.CoreOrigin)
-	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Path != "" && u.Path != "/" || scope.Key == "" || scope.Model == "" || scope.MaxOutputTokens < 1 || scope.MaxOutputTokens > 64000 || scope.API != "responses" && scope.API != "chat/completions" {
-		return nil, errors.New("invalid Core proxy scope")
+	if strings.TrimSpace(scope.GatewayBase) == "" {
+		return nil, ErrGatewayUnconfigured
+	}
+	if scope.Key == "" {
+		return nil, ErrGatewayKeyMissing
+	}
+	u, err := url.Parse(scope.GatewayBase)
+	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || scope.Model == "" || scope.MaxOutputTokens < 1 || scope.MaxOutputTokens > 64000 || scope.API != "responses" && scope.API != "chat/completions" {
+		return nil, errors.New("invalid gateway scope")
 	}
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -116,21 +132,23 @@ func handler(task context.Context, scope Scope, token, host string, client *http
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
 		defer cancel()
-		req, err := http.NewRequestWithContext(ctx, "POST", strings.TrimRight(scope.CoreOrigin, "/")+"/api/llm-proxy/v1/"+scope.API, bytes.NewReader(data))
+		req, err := http.NewRequestWithContext(ctx, "POST", strings.TrimRight(scope.GatewayBase, "/")+"/"+scope.API, bytes.NewReader(data))
 		if err != nil {
 			http.Error(w, "proxy unavailable", 502)
 			return
 		}
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("x-llm-proxy-key", scope.Key)
+		// X-Api-Key, not Authorization: PREPROD/PROD Kong answers 403 to any
+		// Authorization: Bearer; the gateway accepts X-Api-Key on every route.
+		req.Header.Set("X-Api-Key", scope.Key)
 		res, err := client.Do(req)
 		if err != nil {
-			http.Error(w, "Core transport unavailable", 502)
+			http.Error(w, "gateway transport unavailable", 502)
 			return
 		}
 		defer res.Body.Close()
 		if res.StatusCode < 200 || res.StatusCode >= 300 {
-			http.Error(w, "Core request rejected", 502)
+			http.Error(w, "gateway request rejected", 502)
 			return
 		}
 		w.Header().Set("Content-Type", res.Header.Get("Content-Type"))

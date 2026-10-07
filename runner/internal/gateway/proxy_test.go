@@ -1,8 +1,9 @@
-package llmproxy
+package gateway
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -15,11 +16,13 @@ func TestScopeAndSecretSeparation(t *testing.T) {
 	var calls atomic.Int32
 	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
-		if r.Header.Get("x-llm-proxy-key") != "test-core-secret" || r.Header.Get("Authorization") != "" {
+		// Kong (PREPROD/PROD) answers 403 to any Bearer: the key must travel
+		// only as X-Api-Key, and nothing must reach a Core llm-proxy route.
+		if r.Header.Get("X-Api-Key") != "test-core-secret" || r.Header.Get("Authorization") != "" || r.Header.Get("x-llm-proxy-key") != "" {
 			t.Error("credential separation failed")
 		}
 		var body map[string]any
-		if json.NewDecoder(r.Body).Decode(&body) != nil || body["max_output_tokens"] != float64(77) || r.URL.Path != "/api/llm-proxy/v1/responses" {
+		if json.NewDecoder(r.Body).Decode(&body) != nil || body["max_output_tokens"] != float64(77) || r.URL.Path != "/v1/responses" {
 			t.Error("scope/budget not applied")
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -28,7 +31,7 @@ func TestScopeAndSecretSeparation(t *testing.T) {
 	defer upstream.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	h := handler(ctx, Scope{CoreOrigin: upstream.URL, Key: "test-core-secret", Model: "fixed", MaxOutputTokens: 77, API: "responses"}, "local-token", "127.0.0.1:3456", upstream.Client())
+	h := handler(ctx, Scope{GatewayBase: upstream.URL + "/v1", Key: "test-core-secret", Model: "fixed", MaxOutputTokens: 77, API: "responses"}, "local-token", "127.0.0.1:3456", upstream.Client())
 	for _, test := range []struct {
 		name, host, origin, auth, body, path string
 		status                               int
@@ -67,4 +70,33 @@ func TestScopeAndSecretSeparation(t *testing.T) {
 	if out.Code != 410 {
 		t.Fatal("expired capability accepted")
 	}
+}
+
+// Regression (T11): a private-device task without a gateway base or minted key
+// fails explicitly; it never falls back to a Core relay or a fixed key.
+func TestStartRequiresGatewayBaseAndMintedKey(t *testing.T) {
+	ctx := context.Background()
+	scope := Scope{GatewayBase: "https://gateway.example/v1", Key: "minted", Model: "fixed", MaxOutputTokens: 8, API: "responses"}
+	missingBase := scope
+	missingBase.GatewayBase = " "
+	if _, err := Start(ctx, missingBase); !errors.Is(err, ErrGatewayUnconfigured) {
+		t.Fatalf("missing gateway base: %v", err)
+	}
+	missingKey := scope
+	missingKey.Key = ""
+	if _, err := Start(ctx, missingKey); !errors.Is(err, ErrGatewayKeyMissing) {
+		t.Fatalf("missing key: %v", err)
+	}
+	for _, base := range []string{"http://gateway.example/v1", "https://user:pw@gateway.example/v1", "https://gateway.example/v1?k=1"} {
+		bad := scope
+		bad.GatewayBase = base
+		if _, err := Start(ctx, bad); err == nil {
+			t.Fatalf("unsafe gateway base accepted: %s", base)
+		}
+	}
+	p, err := Start(ctx, scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.Close()
 }

@@ -60,7 +60,7 @@ func run() error {
 		if allowed != nil {
 			reason = allowed.Error()
 		}
-		emit(map[string]any{"identity": identity, "nativeUserReady": allowed == nil, "reason": reason, "admission": "unavailable", "version": "0.2.0", "distribution": "engineering-preview", "noSandbox": runtime.GOOS != "windows", "windowsSandbox": "unelevated (per-task config.toml)"})
+		emit(map[string]any{"identity": identity, "nativeUserReady": allowed == nil, "reason": reason, "admission": "unavailable", "version": "0.3.0", "distribution": "engineering-preview", "noSandbox": runtime.GOOS != "windows", "windowsSandbox": "unelevated (per-task config.toml)"})
 		return nil
 	}
 	if command != "status" && command != "install" && command != "verify" && command != "bind" && command != "renew" && command != "revoke" && command != "run" && command != "device-status" {

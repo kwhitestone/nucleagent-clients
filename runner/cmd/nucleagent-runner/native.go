@@ -12,12 +12,13 @@ import (
 	"time"
 
 	"github.com/nucleagent/nucleagent-shared/a2a"
+	"github.com/nucleagent/nucleagent-shared/llm"
 	"nucleagent-desktop-runner/internal/adapter"
 	"nucleagent-desktop-runner/internal/bridge"
 	"nucleagent-desktop-runner/internal/catalog"
 	"nucleagent-desktop-runner/internal/device"
+	"nucleagent-desktop-runner/internal/gateway"
 	"nucleagent-desktop-runner/internal/ledger"
-	"nucleagent-desktop-runner/internal/llmproxy"
 	"nucleagent-desktop-runner/internal/platform"
 	"nucleagent-desktop-runner/internal/vault"
 )
@@ -247,15 +248,16 @@ func executeNative(root, generation string, bundle catalog.Bundle, credential va
 		}
 		key := ""
 		for name, value := range request.Headers {
-			if strings.EqualFold(name, "x-llm-proxy-key") {
+			if strings.EqualFold(name, llm.KeyHeader) {
 				key = value
 			}
 		}
 		if request.ModelLimits == nil {
 			return out
 		}
-		proxy, err := llmproxy.Start(ctx, llmproxy.Scope{CoreOrigin: credential.CoreOrigin, Key: key, Model: request.Model, MaxOutputTokens: request.ModelLimits.MaxOutputTokens, API: "responses"})
+		proxy, err := gateway.Start(ctx, gateway.Scope{GatewayBase: request.GatewayBase, Key: key, Model: request.Model, MaxOutputTokens: request.ModelLimits.MaxOutputTokens, API: "responses"})
 		if err != nil {
+			out.Result.ErrorCode = gatewayErrorCode(err)
 			return out
 		}
 		defer proxy.Close()
@@ -286,4 +288,14 @@ func executeNative(root, generation string, bundle catalog.Bundle, credential va
 		}
 		return out
 	}
+}
+
+func gatewayErrorCode(err error) string {
+	switch {
+	case errors.Is(err, gateway.ErrGatewayUnconfigured):
+		return "gateway_unconfigured"
+	case errors.Is(err, gateway.ErrGatewayKeyMissing):
+		return "gateway_key_missing"
+	}
+	return "gateway_scope_invalid"
 }

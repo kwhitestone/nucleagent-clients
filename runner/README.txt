@@ -148,6 +148,19 @@ has the permission, and each command checks the caller label and local origin.
 Core credentials never enter CLI environment or storage upload requests. The
 CLI receives a per-task loopback proxy token. Raw CLI diagnostics are discarded.
 
+Model calls (目鱼网关)
+Model traffic goes straight from the runner to the gateway; Core no longer
+relays it (the /api/llm-proxy route is retired and unsupported). For each task
+Core mints a gateway key bound to the user and conversation (billing is
+attributed to both) and sends it with ExecutionRequest.GatewayBase, which is
+Core's GATEWAY_PUBLIC_URL (HTTPS, including /v1). The runner forwards
+<GatewayBase>/responses with header X-Api-Key; it never sends Authorization
+(PREPROD/PROD Kong answers 403 to Bearer). There is no fixed or manual key.
+The gateway host must be reachable from the PC's network.
+Result error codes: gateway_unconfigured (Core has no GATEWAY_PUBLIC_URL),
+gateway_key_missing (Core minted no key), gateway_scope_invalid (non-HTTPS or
+malformed base). An upstream rejection streams "gateway request rejected".
+
 Offline checks versus acceptance
 The optional G9_CODEX_PROTOCOL_FIXTURE tests exercise a real verified Linux CLI
 against a fake loopback Responses service, without inference or paid tasks.
